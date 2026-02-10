@@ -9,6 +9,16 @@ import argparse
 import asyncio
 import os
 import signal
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from workspace root (parent of sidecar/).
+# The sidecar runs with cwd=sidecar/, so the .env is one level up.
+_workspace_root = Path(__file__).resolve().parent.parent.parent
+_env_file = _workspace_root / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
 
 import uvicorn
 from fastapi import FastAPI

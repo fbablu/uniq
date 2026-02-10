@@ -40,11 +40,12 @@ pub struct SearchPapersRequest {
 
 #[derive(Debug, Serialize)]
 pub struct ExtractTechniqueRequest {
-    pub pdf_url: String,
+    pub pdf_url: Option<String>,
     pub paper_id: String,
     pub paper_title: String,
     pub project_summary: String,
     pub user_request: String,
+    pub doi: Option<String>,
 }
 
 // Response is uniq_core::research::TechniqueCard

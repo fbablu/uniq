@@ -81,11 +81,12 @@ impl SidecarClient {
     #[instrument(skip(self, project_summary))]
     pub async fn extract_technique(
         &self,
-        pdf_url: String,
+        pdf_url: Option<String>,
         paper_id: String,
         paper_title: String,
         project_summary: String,
         user_request: String,
+        doi: Option<String>,
     ) -> anyhow::Result<TechniqueCard> {
         let url = format!("{}/api/extract-technique", self.base_url);
         let req = ExtractTechniqueRequest {
@@ -94,6 +95,7 @@ impl SidecarClient {
             paper_title,
             project_summary,
             user_request,
+            doi,
         };
         let resp = self.client.post(&url).json(&req).send().await?;
         let technique: TechniqueCard = resp.error_for_status()?.json().await?;

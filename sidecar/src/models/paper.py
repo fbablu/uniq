@@ -22,6 +22,7 @@ class PaperMeta(BaseModel):
     citation_count: int | None = None
     url: str
     pdf_url: str | None = None
+    doi: str | None = None
     source: PaperSource
     fields: list[str] = []
     relevance_score: float | None = None

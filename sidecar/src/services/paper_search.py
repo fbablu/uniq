@@ -93,6 +93,10 @@ async def search_semantic_scholar(
 
                 authors = [a.get("name", "") for a in item.get("authors", [])]
 
+                # Extract DOI from externalIds.
+                external_ids = item.get("externalIds") or {}
+                doi = external_ids.get("DOI")
+
                 paper = PaperMeta(
                     id=f"s2:{item.get('paperId', '')}",
                     title=item.get("title", ""),
@@ -102,6 +106,7 @@ async def search_semantic_scholar(
                     citation_count=item.get("citationCount"),
                     url=item.get("url", ""),
                     pdf_url=pdf_url,
+                    doi=doi,
                     source=PaperSource.SEMANTIC_SCHOLAR,
                     fields=item.get("fieldsOfStudy", []) or [],
                 )
@@ -183,6 +188,17 @@ async def search_arxiv(
                 authors = [a.get("name", "") for a in entry.get("authors", [])]
                 categories = [t.get("term", "") for t in entry.get("tags", [])]
 
+                # ArXiv entries may have a DOI link.
+                arxiv_doi = None
+                for link in entry.get("links", []):
+                    href = link.get("href", "")
+                    if "doi.org" in href:
+                        arxiv_doi = href.split("doi.org/")[-1] if "doi.org/" in href else None
+                        break
+                # feedparser also parses the <arxiv:doi> tag if present.
+                if not arxiv_doi:
+                    arxiv_doi = entry.get("arxiv_doi")
+
                 paper = PaperMeta(
                     id=f"arxiv:{arxiv_id}",
                     title=entry.get("title", "").replace("\n", " ").strip(),
@@ -192,6 +208,7 @@ async def search_arxiv(
                     abstract_text=entry.get("summary", "").replace("\n", " ").strip(),
                     url=entry.get("id", ""),
                     pdf_url=pdf_url,
+                    doi=arxiv_doi,
                     source=PaperSource.ARXIV,
                     fields=categories,
                 )

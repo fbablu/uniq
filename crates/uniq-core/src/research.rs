@@ -31,6 +31,9 @@ pub struct PaperMeta {
     /// Direct URL to an open-access PDF, if available.
     pub pdf_url: Option<String>,
 
+    /// DOI identifier, if available.
+    pub doi: Option<String>,
+
     /// Source of this paper record.
     pub source: PaperSource,
 

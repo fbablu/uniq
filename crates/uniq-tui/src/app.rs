@@ -564,16 +564,14 @@ impl App {
             let user_request = user_request.clone();
             let project_summary = project_summary.clone();
 
-            let pdf_url = match paper.pdf_url.clone() {
-                Some(url) => url,
-                None => {
-                    let _ = tx.send(Action::TechniqueExtractionFailed {
-                        paper_id: paper.id.clone(),
-                        error: "No PDF URL available".to_string(),
-                    });
-                    continue;
-                }
-            };
+            // Skip papers that have neither a PDF URL nor a DOI — we can't download anything.
+            if paper.pdf_url.is_none() && paper.doi.is_none() {
+                let _ = tx.send(Action::TechniqueExtractionFailed {
+                    paper_id: paper.id.clone(),
+                    error: "No PDF URL or DOI available".to_string(),
+                });
+                continue;
+            }
 
             tokio::spawn(async move {
                 // Notify UI that this paper is being processed.
@@ -583,11 +581,12 @@ impl App {
 
                 match client
                     .extract_technique(
-                        pdf_url,
+                        paper.pdf_url.clone(),
                         paper.id.clone(),
                         paper.title.clone(),
                         project_summary,
                         user_request,
+                        paper.doi.clone(),
                     )
                     .await
                 {
