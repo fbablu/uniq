@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/uniq-cli",
+    "crates/uniq-tui",
+    "crates/uniq-core",
+    "crates/uniq-sidecar",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/yourusername/uniq"
+description = "Research-driven AI technique discovery and implementation engine"
+
+[workspace.dependencies]
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["bracketed-paste"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Git
+git2 = "0.19"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+dirs = "6"
+toml = "0.8"
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
