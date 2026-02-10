@@ -2,9 +2,9 @@
 //! and select which ones to generate variants for.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::action::Action;
@@ -25,7 +25,7 @@ pub struct TechniqueCardsComponent {
     pub extracting: bool,
     /// Whether extraction was already attempted (prevents re-trigger loops).
     pub extraction_attempted: bool,
-    /// Progress: (done, total papers).
+    /// Progress: (done, total).
     pub progress: (usize, usize),
     /// Errors during extraction.
     pub errors: Vec<(String, String)>,
@@ -34,7 +34,7 @@ pub struct TechniqueCardsComponent {
     /// Title of the paper currently being extracted.
     current_paper: String,
     /// Titles of papers being processed concurrently.
-    active_papers: Vec<String>,
+    pub active_papers: Vec<String>,
 }
 
 impl TechniqueCardsComponent {
@@ -94,27 +94,15 @@ impl Component for TechniqueCardsComponent {
             }
             Action::ExtractionStarted { paper_title } => {
                 self.current_paper = paper_title.clone();
-                self.active_papers.push(paper_title.clone());
-                // Keep only the most recent few for display.
-                if self.active_papers.len() > 5 {
-                    self.active_papers.remove(0);
-                }
                 None
             }
             Action::TechniqueExtracted(card) => {
-                self.progress.0 += 1;
-                // Remove from active list.
-                self.active_papers.retain(|t| t != &card.paper_title);
                 self.techniques.push(*card.clone());
                 self.techniques
                     .sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
                 None
             }
             Action::TechniqueExtractionFailed { paper_id, error } => {
-                self.progress.0 += 1;
-                // Remove from active list by paper_id prefix match.
-                self.active_papers
-                    .retain(|t| !paper_id.contains(t) && !t.contains(paper_id));
                 self.errors.push((paper_id.clone(), error.clone()));
                 None
             }
@@ -122,12 +110,12 @@ impl Component for TechniqueCardsComponent {
                 self.extracting = false;
                 self.active_papers.clear();
                 self.current_paper.clear();
-                // Auto-select top 10.
-                for (i, tech) in self.techniques.iter_mut().enumerate() {
-                    tech.selected = i < 10;
+                // Auto-select all techniques (batch already filtered to top N).
+                for tech in self.techniques.iter_mut() {
+                    tech.selected = true;
                 }
                 Some(Action::SetStatus(format!(
-                    "Extracted {} techniques. Select and press [Right] to generate variants.",
+                    "{} techniques found. Toggle with Enter, then → to generate variants.",
                     self.techniques.len()
                 )))
             }
@@ -136,78 +124,70 @@ impl Component for TechniqueCardsComponent {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Technique Selection ")
-            .title_style(Theme::title())
-            .borders(Borders::ALL)
-            .border_style(Theme::dim());
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
+        // No outer border — just use the space directly.
         // Empty state (not extracting).
         if self.techniques.is_empty() && !self.extracting {
-            let mut lines = vec![Line::from("")];
+            let mut lines = vec![Line::from(""), Line::from("")];
             if !self.errors.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!("Extraction failed for all {} papers.", self.errors.len()),
+                    format!("  Extraction failed for {} paper(s).", self.errors.len()),
                     Style::default().fg(Theme::error()),
                 )));
                 if let Some((_id, err)) = self.errors.first() {
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(truncate(err, 120), Theme::dim())));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", truncate(err, 100)),
+                        Theme::dim(),
+                    )));
                 }
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Hint: Set ANTHROPIC_API_KEY to enable technique extraction.",
-                    Theme::dim(),
+                    "  Check ANTHROPIC_API_KEY and try again.",
+                    Theme::muted(),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
-                    "No techniques extracted yet.",
-                    Theme::dim(),
+                    "  No techniques extracted yet.",
+                    Theme::muted(),
                 )));
                 lines.push(Line::from(Span::styled(
-                    "Complete Phase 2 first, then extraction will begin automatically.",
+                    "  Complete Phase 2 first, then extraction begins automatically.",
                     Theme::dim(),
                 )));
             }
-            let msg = Paragraph::new(lines);
-            frame.render_widget(msg, inner);
+            frame.render_widget(Paragraph::new(lines), area);
             return;
         }
 
-        // Extracting: show progress panel + any techniques extracted so far.
+        // Extracting: show a clean progress view.
         if self.extracting {
-            self.render_extracting(frame, inner);
+            self.render_extracting(frame, area);
             return;
         }
 
-        // Normal view: summary + list + detail.
+        // Normal view: technique list + detail.
         let chunks = Layout::vertical([
-            Constraint::Length(2),  // Summary
-            Constraint::Min(10),    // Technique list
-            Constraint::Length(10), // Detail panel
+            Constraint::Length(1), // Header
+            Constraint::Min(8),    // Technique list
+            Constraint::Length(9), // Detail panel
         ])
-        .split(inner);
+        .split(area);
 
-        // Summary.
-        let summary = Paragraph::new(Line::from(vec![
+        // Header.
+        let header = Line::from(vec![
+            Span::styled("  ", Theme::dim()),
             Span::styled(
-                format!(
-                    "{}/{} techniques selected",
-                    self.selected_count(),
-                    self.techniques.len()
-                ),
+                format!("{}/{}", self.selected_count(), self.techniques.len()),
                 Theme::header(),
             ),
-            Span::styled("  |  ", Theme::dim()),
-            Span::styled("[Enter]", Theme::selected()),
+            Span::styled(" selected", Theme::muted()),
+            Span::styled("    ", Theme::dim()),
+            Span::styled("enter", Theme::key_hint()),
             Span::styled(" toggle  ", Theme::dim()),
-            Span::styled("[Right]", Theme::selected()),
+            Span::styled("→", Theme::key_hint()),
             Span::styled(" generate variants", Theme::dim()),
-        ]));
-        frame.render_widget(summary, chunks[0]);
+        ]);
+        frame.render_widget(Paragraph::new(header), chunks[0]);
 
         self.render_technique_list(frame, chunks[1]);
         self.render_technique_detail(frame, chunks[2]);
@@ -215,142 +195,123 @@ impl Component for TechniqueCardsComponent {
 }
 
 impl TechniqueCardsComponent {
-    // ── Extraction progress view ────────────────────────────────
+    // ── Extraction progress view ────────────────────────────
 
     fn render_extracting(&self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::vertical([
-            Constraint::Length(9), // Progress panel
-            Constraint::Min(4),    // Techniques found so far
-        ])
-        .split(area);
-
         let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
-        let w = chunks[0].width as usize;
-        let (done, total) = self.progress;
+        let elapsed_secs = self.spinner_tick / 10;
 
-        // Progress bar.
-        let pct = if total > 0 {
-            (done as f64 / total as f64).min(1.0)
-        } else {
-            0.0
-        };
-        let bar_width = w.saturating_sub(2);
-        let filled = (bar_width as f64 * pct) as usize;
-        let empty = bar_width.saturating_sub(filled);
-        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
-
-        let mut lines = vec![
+        let lines = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(""),
             Line::from(vec![
                 Span::styled(
-                    format!(" {} ", spinner),
+                    format!("  {} ", spinner),
                     Style::default()
                         .fg(Theme::accent())
-                        .add_modifier(ratatui::style::Modifier::BOLD),
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    format!("Extracting techniques from papers...  {}/{}", done, total),
-                    Theme::header(),
-                ),
+                Span::styled("Analyzing paper abstracts with Claude", Theme::header()),
             ]),
+            Line::from(""),
             Line::from(Span::styled(
-                format!(" {}", bar),
-                Style::default().fg(Theme::accent()),
+                format!(
+                    "  Extracting techniques from {} papers...  ({}s)",
+                    self.progress.1.max(1) * 8, // approximate paper count
+                    elapsed_secs
+                ),
+                Theme::muted(),
             )),
             Line::from(""),
+            Line::from(Span::styled(
+                "  This uses abstracts instead of PDFs — typically 10-20 seconds.",
+                Theme::dim(),
+            )),
+            Line::from(""),
+            if !self.techniques.is_empty() {
+                Line::from(Span::styled(
+                    format!("  {} techniques found so far", self.techniques.len()),
+                    Style::default().fg(Theme::success()),
+                ))
+            } else {
+                Line::from(Span::styled("  Waiting for results...", Theme::dim()))
+            },
         ];
 
-        // Show active papers being processed.
-        if !self.active_papers.is_empty() {
-            for (i, title) in self.active_papers.iter().rev().take(3).enumerate() {
-                let prefix = if i == 0 { "→" } else { " " };
-                let style = if i == 0 {
-                    Style::default().fg(Theme::warning())
-                } else {
-                    Theme::dim()
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(format!("   {} ", prefix), style),
-                    Span::styled(
-                        format!("\"{}\"", truncate(title, w.saturating_sub(8))),
-                        if i == 0 {
-                            Theme::normal()
-                        } else {
-                            Theme::dim()
-                        },
-                    ),
-                ]));
-            }
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled("   → ", Style::default().fg(Theme::warning())),
-                Span::styled(
-                    format!("\"{}\"", truncate(&self.current_paper, w.saturating_sub(8))),
-                    Theme::normal(),
-                ),
-            ]));
-        }
-
-        // Stats.
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!(
-                "   {} extracted, {} failed",
-                self.techniques.len(),
-                self.errors.len()
-            ),
-            Theme::dim(),
-        )));
-
-        let panel = Paragraph::new(lines);
-        frame.render_widget(panel, chunks[0]);
-
-        // Show techniques found so far.
-        if !self.techniques.is_empty() {
-            self.render_technique_list(frame, chunks[1]);
-        } else {
-            let waiting = Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "   Waiting for first extraction to complete...",
-                    Theme::dim(),
-                )),
-            ]);
-            frame.render_widget(waiting, chunks[1]);
-        }
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
-    // ── Technique list ──────────────────────────────────────────
+    // ── Technique list ──────────────────────────────────────
 
     fn render_technique_list(&self, frame: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self
+        let visible_height = area.height as usize;
+        let scroll_offset = if self.selected >= visible_height {
+            self.selected - visible_height + 1
+        } else {
+            0
+        };
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, tech) in self
             .techniques
             .iter()
             .enumerate()
-            .map(|(i, tech)| {
-                let checkbox = if tech.selected { "[x]" } else { "[ ]" };
-                let relevance = format!("{:.0}%", tech.relevance_score * 100.0);
-                let style = if i == self.selected {
-                    Theme::selected()
-                } else if tech.selected {
-                    Style::default().fg(Theme::success())
-                } else {
-                    Theme::normal()
-                };
+            .skip(scroll_offset)
+            .take(visible_height)
+        {
+            let is_selected = i == self.selected;
+            let checkbox = if tech.selected { "◉" } else { "○" };
+            let checkbox_style = if tech.selected {
+                Style::default().fg(Theme::success())
+            } else {
+                Theme::dim()
+            };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} ", checkbox), style),
-                    Span::styled(format!("{:<40} ", truncate(&tech.name, 40)), style),
-                    Span::styled(format!("{:<8} ", tech.implementation_complexity), style),
-                    Span::styled(relevance, style),
-                ]))
-            })
-            .collect();
+            let relevance = format!("{:.0}%", tech.relevance_score * 100.0);
+            let complexity_style = match tech.implementation_complexity.to_string().as_str() {
+                "Low" => Style::default().fg(Theme::success()),
+                "High" => Style::default().fg(Theme::warning()),
+                _ => Theme::muted(),
+            };
 
-        let list = List::new(items).block(Block::default().borders(Borders::TOP));
-        frame.render_widget(list, area);
+            let row_style = if is_selected {
+                Style::default().fg(Theme::fg()).bg(Theme::selection_bg())
+            } else {
+                Style::default()
+            };
+
+            let name_width = (area.width as usize).saturating_sub(20);
+            lines.push(Line::from(vec![
+                Span::styled(if is_selected { " ▸ " } else { "   " }, row_style),
+                Span::styled(format!("{} ", checkbox), checkbox_style),
+                Span::styled(
+                    format!(
+                        "{:<width$}",
+                        truncate(&tech.name, name_width),
+                        width = name_width
+                    ),
+                    if is_selected {
+                        Style::default()
+                            .fg(Theme::fg())
+                            .bg(Theme::selection_bg())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Theme::normal()
+                    },
+                ),
+                Span::styled(
+                    format!("{:<4}", tech.implementation_complexity),
+                    complexity_style,
+                ),
+                Span::styled(format!(" {:>3}", relevance), Theme::muted()),
+            ]));
+        }
+
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
-    // ── Technique detail ────────────────────────────────────────
+    // ── Technique detail ────────────────────────────────────
 
     fn render_technique_detail(&self, frame: &mut Frame, area: Rect) {
         let Some(tech) = self.techniques.get(self.selected) else {
@@ -358,43 +319,44 @@ impl TechniqueCardsComponent {
         };
 
         let detail_block = Block::default()
-            .title(format!(" {} ", truncate(&tech.name, 50)))
-            .title_style(Theme::title())
-            .borders(Borders::ALL)
-            .border_style(Theme::dim());
+            .borders(Borders::TOP)
+            .border_style(Theme::border());
+
+        let inner = detail_block.inner(area);
+        frame.render_widget(detail_block, area);
 
         let detail = Paragraph::new(vec![
             Line::from(vec![
-                Span::styled("Paper: ", Theme::header()),
+                Span::styled("  Paper  ", Theme::muted()),
                 Span::styled(&tech.paper_title, Theme::normal()),
             ]),
             Line::from(vec![
-                Span::styled("Components: ", Theme::header()),
-                Span::styled(tech.key_components.join(", "), Theme::normal()),
-            ]),
-            Line::from(vec![
-                Span::styled("Dependencies: ", Theme::header()),
-                Span::styled(tech.dependencies.join(", "), Theme::normal()),
-            ]),
-            Line::from(vec![
-                Span::styled("Complexity: ", Theme::header()),
-                Span::styled(
-                    format!("{}", tech.implementation_complexity),
-                    Theme::normal(),
-                ),
-                Span::styled("  Hardware: ", Theme::header()),
-                Span::styled(&tech.hardware_requirements, Theme::normal()),
+                Span::styled("  Deps   ", Theme::muted()),
+                Span::styled(tech.dependencies.join(", "), Theme::dim()),
             ]),
             Line::from(""),
-            Line::from(Span::styled(
-                truncate(&tech.integration_approach, 200),
-                Theme::dim(),
-            )),
+            Line::from(vec![
+                Span::styled("  ", Theme::dim()),
+                Span::styled(
+                    truncate(&tech.methodology, (inner.width as usize).saturating_sub(4)),
+                    Theme::dim(),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  ", Theme::dim()),
+                Span::styled(
+                    truncate(
+                        &tech.integration_approach,
+                        (inner.width as usize).saturating_sub(4),
+                    ),
+                    Theme::muted(),
+                ),
+            ]),
         ])
-        .wrap(Wrap { trim: true })
-        .block(detail_block);
+        .wrap(Wrap { trim: true });
 
-        frame.render_widget(detail, area);
+        frame.render_widget(detail, inner);
     }
 }
 

@@ -427,14 +427,17 @@ impl ProjectIntakeComponent {
         area: Rect,
     ) {
         let border_style = if is_focused {
-            Style::default()
-                .fg(Theme::accent())
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(Theme::accent())
         } else {
-            Theme::normal()
+            Theme::border()
         };
         let block = Block::default()
             .title(title)
+            .title_style(if is_focused {
+                Theme::key_hint()
+            } else {
+                Theme::muted()
+            })
             .borders(Borders::ALL)
             .border_style(border_style);
 
@@ -629,14 +632,8 @@ impl Component for ProjectIntakeComponent {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Project Intake ")
-            .title_style(Theme::title())
-            .borders(Borders::ALL)
-            .border_style(Theme::dim());
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        // No outer block — content fills the area directly.
+        let inner = area;
 
         // Calculate suggestion area height.
         let suggestion_height = if self.has_suggestions() {
@@ -680,7 +677,7 @@ impl Component for ProjectIntakeComponent {
         if self.has_suggestions() {
             let suggestion_block = Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                .border_style(Style::default().fg(Theme::accent()));
+                .border_style(Theme::border());
 
             let items: Vec<ListItem> = self
                 .suggestions
@@ -723,36 +720,34 @@ impl Component for ProjectIntakeComponent {
         // ── Instructions ────────────────────────────────────────
         let instructions = if self.has_suggestions() {
             Paragraph::new(Line::from(vec![
-                Span::styled("[Tab]", Theme::selected()),
+                Span::styled("  tab", Theme::key_hint()),
                 Span::styled(" accept  ", Theme::dim()),
-                Span::styled("[Up/Down]", Theme::selected()),
+                Span::styled("↑↓", Theme::key_hint()),
                 Span::styled(" navigate  ", Theme::dim()),
-                Span::styled("[Enter]", Theme::selected()),
+                Span::styled("enter", Theme::key_hint()),
                 Span::styled(" next field", Theme::dim()),
             ]))
         } else if self.wants_input() && self.focused == InputField::Description {
             Paragraph::new(Line::from(vec![
-                Span::styled("[Ctrl+S]", Theme::selected()),
+                Span::styled("  ctrl+s", Theme::key_hint()),
                 Span::styled(" submit  ", Theme::dim()),
-                Span::styled("[Tab]", Theme::selected()),
-                Span::styled(" switch field  ", Theme::dim()),
-                Span::styled("[Ctrl+V]", Theme::selected()),
-                Span::styled(" paste  ", Theme::dim()),
-                Span::styled("[Ctrl+W]", Theme::selected()),
-                Span::styled(" del word", Theme::dim()),
+                Span::styled("tab", Theme::key_hint()),
+                Span::styled(" switch  ", Theme::dim()),
+                Span::styled("ctrl+v", Theme::key_hint()),
+                Span::styled(" paste", Theme::dim()),
             ]))
         } else if self.wants_input() {
             Paragraph::new(Line::from(vec![
-                Span::styled("[Enter]", Theme::selected()),
+                Span::styled("  enter", Theme::key_hint()),
                 Span::styled(" next field  ", Theme::dim()),
-                Span::styled("[Ctrl+S]", Theme::selected()),
+                Span::styled("ctrl+s", Theme::key_hint()),
                 Span::styled(" submit  ", Theme::dim()),
-                Span::styled("[Tab]", Theme::selected()),
-                Span::styled(" switch field", Theme::dim()),
+                Span::styled("tab", Theme::key_hint()),
+                Span::styled(" switch", Theme::dim()),
             ]))
         } else {
             Paragraph::new(Line::from(vec![
-                Span::styled("[Right]", Theme::selected()),
+                Span::styled("  →", Theme::key_hint()),
                 Span::styled(" next phase", Theme::dim()),
             ]))
         };
@@ -804,11 +799,9 @@ impl ProjectIntakeComponent {
     /// Render the multi-line description text area with scrolling viewport.
     fn render_description_field(&self, is_focused: bool, frame: &mut Frame, area: Rect) {
         let border_style = if is_focused {
-            Style::default()
-                .fg(Theme::accent())
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(Theme::accent())
         } else {
-            Theme::normal()
+            Theme::border()
         };
 
         let text = &self.description_input;

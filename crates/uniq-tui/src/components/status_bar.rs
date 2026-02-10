@@ -23,6 +23,17 @@ impl StatusBarComponent {
             current_phase: Phase::ProjectIntake,
         }
     }
+
+    /// Short phase name for the pill badge.
+    fn phase_badge(&self) -> &'static str {
+        match self.current_phase {
+            Phase::ProjectIntake => "Intake",
+            Phase::ResearchDiscovery => "Research",
+            Phase::TechniqueSelection => "Techniques",
+            Phase::VariantGeneration => "Build",
+            Phase::Benchmarking => "Benchmark",
+        }
+    }
 }
 
 impl Component for StatusBarComponent {
@@ -47,19 +58,19 @@ impl Component for StatusBarComponent {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let width = area.width as usize;
 
-        // Right side: key hints (fixed width).
-        let hints = " [q]uit [?]help [1-5]phase [m]erge";
-        let hints_len = hints.len();
+        // Right side: compact key hints
+        let hints = "q·?·1-5·m";
+        let hints_len = hints.len() + 1; // +1 for trailing space
 
-        // Phase label.
-        let label = format!(" {} ", self.current_phase.label());
-        let label_len = label.len();
+        // Phase badge
+        let badge = self.phase_badge();
+        let badge_len = badge.len() + 2; // spaces around badge
 
-        // Truncate message to remaining space.
+        // Truncate message to remaining space
         let msg_budget = width
-            .saturating_sub(label_len)
+            .saturating_sub(badge_len)
             .saturating_sub(hints_len)
-            .saturating_sub(2); // 2 for padding
+            .saturating_sub(4); // separators and spacing
 
         let msg = if self.message.len() > msg_budget {
             if msg_budget > 3 {
@@ -71,23 +82,17 @@ impl Component for StatusBarComponent {
             self.message.clone()
         };
 
-        // Pad to push hints to the right edge.
-        let used = label_len + 1 + msg.len();
+        // Pad to push hints to the right edge
+        let used = badge_len + 2 + msg.len();
         let pad = width.saturating_sub(used + hints_len);
 
         let line = Line::from(vec![
-            Span::styled(label, Theme::status_bar()),
-            Span::styled(" ", Theme::dim()),
+            Span::styled(format!(" {} ", badge), Theme::muted()),
+            Span::styled("  ", Theme::dim()),
             Span::styled(msg, Theme::dim()),
             Span::raw(" ".repeat(pad)),
-            Span::styled("[q]", Theme::selected()),
-            Span::styled("uit ", Theme::dim()),
-            Span::styled("[?]", Theme::selected()),
-            Span::styled("help ", Theme::dim()),
-            Span::styled("[1-5]", Theme::selected()),
-            Span::styled("phase ", Theme::dim()),
-            Span::styled("[m]", Theme::selected()),
-            Span::styled("erge", Theme::dim()),
+            Span::styled(hints, Theme::key_hint()),
+            Span::raw(" "),
         ]);
 
         frame.render_widget(Paragraph::new(line), area);

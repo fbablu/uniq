@@ -3,6 +3,9 @@
 use ratatui::style::{Color, Modifier, Style};
 
 /// The color palette for uniq's TUI.
+///
+/// Uses RGB colors for a professional, subdued look inspired by
+/// Claude Code, lazygit, and similar modern terminal UIs.
 pub struct Theme;
 
 impl Theme {
@@ -12,50 +15,67 @@ impl Theme {
     }
 
     pub fn fg() -> Color {
-        Color::White
+        Color::Rgb(200, 200, 200)
     }
 
     pub fn fg_dim() -> Color {
-        Color::DarkGray
+        Color::Rgb(100, 100, 100)
+    }
+
+    pub fn fg_muted() -> Color {
+        Color::Rgb(140, 140, 140)
     }
 
     // ── Accent colors ───────────────────────────────────────
     pub fn accent() -> Color {
-        Color::Cyan
+        Color::Rgb(110, 170, 255)
     }
 
     pub fn accent_secondary() -> Color {
-        Color::Magenta
+        Color::Rgb(180, 130, 240)
     }
 
     pub fn success() -> Color {
-        Color::Green
+        Color::Rgb(80, 200, 120)
     }
 
     pub fn warning() -> Color {
-        Color::Yellow
+        Color::Rgb(230, 180, 80)
     }
 
     pub fn error() -> Color {
-        Color::Red
+        Color::Rgb(240, 80, 80)
+    }
+
+    // ── Structural colors ───────────────────────────────────
+    pub fn border_color() -> Color {
+        Color::Rgb(60, 60, 60)
+    }
+
+    pub fn selection_bg() -> Color {
+        Color::Rgb(40, 40, 60)
     }
 
     // ── Phase tab colors ────────────────────────────────────
     pub fn phase_active() -> Color {
-        Color::Cyan
+        Self::accent()
     }
 
     pub fn phase_inactive() -> Color {
-        Color::DarkGray
+        Self::fg_dim()
+    }
+
+    pub fn phase_completed() -> Color {
+        Self::success()
     }
 
     // ── Blend ratio bar colors ──────────────────────────────
     pub fn blend_a() -> Color {
-        Color::Cyan
+        Self::accent()
     }
 
     pub fn blend_b() -> Color {
-        Color::Magenta
+        Self::accent_secondary()
     }
 
     // ── Composite styles ────────────────────────────────────
@@ -84,8 +104,24 @@ impl Theme {
         Style::default().fg(Self::fg_dim())
     }
 
+    pub fn muted() -> Style {
+        Style::default().fg(Self::fg_muted())
+    }
+
+    pub fn border() -> Style {
+        Style::default().fg(Self::border_color())
+    }
+
+    pub fn key_hint() -> Style {
+        Style::default().fg(Self::accent())
+    }
+
+    pub fn selection() -> Style {
+        Style::default().bg(Self::selection_bg())
+    }
+
     pub fn status_bar() -> Style {
-        Style::default().fg(Color::White).bg(Color::DarkGray)
+        Style::default().fg(Self::fg_muted())
     }
 
     pub fn tab_active() -> Style {
@@ -96,6 +132,12 @@ impl Theme {
 
     pub fn tab_inactive() -> Style {
         Style::default().fg(Self::phase_inactive())
+    }
+
+    pub fn tab_completed() -> Style {
+        Style::default()
+            .fg(Self::phase_completed())
+            .add_modifier(Modifier::DIM)
     }
 
     pub fn score_color(score: f64, max: f64) -> Color {

@@ -103,6 +103,28 @@ impl SidecarClient {
         Ok(technique)
     }
 
+    /// Batch-extract technique cards from paper abstracts in a single Claude call.
+    #[instrument(skip(self, papers, project_summary))]
+    pub async fn batch_extract_techniques(
+        &self,
+        papers: Vec<uniq_core::research::PaperMeta>,
+        project_summary: String,
+        user_request: String,
+        max_techniques: usize,
+    ) -> anyhow::Result<Vec<TechniqueCard>> {
+        let url = format!("{}/api/batch-extract-techniques", self.base_url);
+        let req = BatchExtractRequest {
+            papers,
+            project_summary,
+            user_request,
+            max_techniques,
+        };
+        let resp = self.client.post(&url).json(&req).send().await?;
+        let techniques: Vec<TechniqueCard> = resp.error_for_status()?.json().await?;
+        debug!("Batch extracted {} techniques", techniques.len());
+        Ok(techniques)
+    }
+
     /// Generate a variant by applying a technique to the project.
     #[instrument(skip(self, technique, project))]
     pub async fn generate_variant(

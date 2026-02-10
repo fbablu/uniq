@@ -1,9 +1,9 @@
 //! Phase 2: Research Discovery — search and display academic papers.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::action::Action;
@@ -115,7 +115,7 @@ impl Component for ResearchExplorerComponent {
                 self.searching = false;
                 self.current_query.clear();
                 Some(Action::SetStatus(format!(
-                    "Found {} papers. Press [Enter] to view, [Right] for next phase.",
+                    "{} papers found. Enter to view, → for next phase.",
                     self.papers.len()
                 )))
             }
@@ -129,243 +129,196 @@ impl Component for ResearchExplorerComponent {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Research Discovery ")
-            .title_style(Theme::title())
-            .borders(Borders::ALL)
-            .border_style(Theme::dim());
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
         // Empty state.
         if self.papers.is_empty() && !self.searching {
             let msg = if let Some(ref err) = self.error {
-                Paragraph::new(Span::styled(
-                    format!("Error: {}", err),
-                    Style::default().fg(Theme::error()),
-                ))
+                Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        format!("  Error: {}", err),
+                        Style::default().fg(Theme::error()),
+                    )),
+                ])
             } else {
                 Paragraph::new(vec![
                     Line::from(""),
-                    Line::from(Span::styled("No papers loaded yet.", Theme::dim())),
-                    Line::from(Span::styled(
-                        "Complete Phase 1 first, then research will begin automatically.",
-                        Theme::dim(),
-                    )),
+                    Line::from(""),
+                    Line::from(Span::styled("  No papers loaded yet.", Theme::muted())),
+                    Line::from(Span::styled("  Complete Phase 1 first.", Theme::dim())),
                 ])
             };
-            frame.render_widget(msg, inner);
+            frame.render_widget(msg, area);
             return;
         }
 
         // Expanded detail view.
         if self.detail_expanded {
             if let Some(paper) = self.papers.get(self.selected) {
-                self.render_expanded_detail(frame, inner, paper);
+                self.render_expanded_detail(frame, area, paper);
             }
             return;
         }
 
-        // Searching: show spinner + progress + thinking text + any papers found so far.
+        // Searching view.
         if self.searching {
-            self.render_searching(frame, inner);
+            self.render_searching(frame, area);
             return;
         }
 
-        // Normal view: summary + table + detail.
+        // Normal view: header + table + detail.
         let chunks = Layout::vertical([
-            Constraint::Length(2), // Summary
-            Constraint::Min(10),   // Paper table
-            Constraint::Length(8), // Paper detail
+            Constraint::Length(1), // Header
+            Constraint::Min(8),    // Paper list
+            Constraint::Length(7), // Paper detail
         ])
-        .split(inner);
+        .split(area);
 
-        // Summary line.
-        let summary = Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!("{} papers found", self.papers.len()),
-                Theme::header(),
-            ),
-            Span::styled("  |  ", Theme::dim()),
-            Span::styled("[Enter]", Theme::selected()),
-            Span::styled(" view details  ", Theme::dim()),
-            Span::styled("[Right]", Theme::selected()),
+        // Header.
+        let header = Line::from(vec![
+            Span::styled("  ", Theme::dim()),
+            Span::styled(format!("{}", self.papers.len()), Theme::header()),
+            Span::styled(" papers", Theme::muted()),
+            Span::styled("    ", Theme::dim()),
+            Span::styled("enter", Theme::key_hint()),
+            Span::styled(" details  ", Theme::dim()),
+            Span::styled("→", Theme::key_hint()),
             Span::styled(" next phase", Theme::dim()),
-        ]));
-        frame.render_widget(summary, chunks[0]);
+        ]);
+        frame.render_widget(Paragraph::new(header), chunks[0]);
 
-        self.render_paper_table(frame, chunks[1]);
+        self.render_paper_list(frame, chunks[1]);
         self.render_paper_detail(frame, chunks[2]);
     }
 }
 
 impl ResearchExplorerComponent {
-    // ── Searching view ──────────────────────────────────────────
+    // ── Searching view ──────────────────────────────────────
 
     fn render_searching(&self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::vertical([
-            Constraint::Length(6), // Progress panel
-            Constraint::Min(4),    // Papers found so far (if any)
-        ])
-        .split(area);
-
         let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
-        let w = chunks[0].width as usize;
+        let elapsed_secs = self.spinner_tick / 10;
 
-        // Animated progress bar (pulsing since we don't know exact progress).
-        let bar_width = w.saturating_sub(2);
-        let cycle = self.spinner_tick % (bar_width * 2);
-        let pos = if cycle < bar_width {
-            cycle
-        } else {
-            bar_width * 2 - cycle
-        };
-        let bar: String = (0..bar_width)
-            .map(|i| {
-                let dist = (i as isize - pos as isize).unsigned_abs();
-                if dist < 3 {
-                    '█'
-                } else if dist < 5 {
-                    '▓'
-                } else if dist < 7 {
-                    '░'
-                } else {
-                    ' '
-                }
-            })
-            .collect();
-
-        let elapsed_secs = self.spinner_tick / 10; // tick rate is 100ms
-
-        let panel = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(
-                    format!(" {} ", spinner),
-                    Style::default()
-                        .fg(Theme::accent())
-                        .add_modifier(ratatui::style::Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("Searching Semantic Scholar + arXiv...  ({}s)", elapsed_secs),
-                    Theme::header(),
-                ),
-            ]),
-            Line::from(Span::styled(
-                format!(" {}", bar),
-                Style::default().fg(Theme::accent()),
-            )),
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(""),
             Line::from(""),
             Line::from(vec![
-                Span::styled("   ", Theme::dim()),
                 Span::styled(
-                    format!("{} papers found so far", self.papers.len()),
-                    if self.papers.is_empty() {
-                        Theme::dim()
-                    } else {
-                        Style::default().fg(Theme::success())
-                    },
+                    format!("  {} ", spinner),
+                    Style::default()
+                        .fg(Theme::accent())
+                        .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled("Searching Semantic Scholar + arXiv", Theme::header()),
+                Span::styled(format!("  ({}s)", elapsed_secs), Theme::dim()),
             ]),
-            Line::from(Span::styled(
-                "   This typically takes 15-25 seconds",
-                Theme::dim(),
-            )),
-        ]);
-        frame.render_widget(panel, chunks[0]);
+            Line::from(""),
+        ];
 
-        // Show papers found so far in a mini table.
         if !self.papers.is_empty() {
-            self.render_paper_table(frame, chunks[1]);
+            lines.push(Line::from(Span::styled(
+                format!("  {} papers found so far", self.papers.len()),
+                Style::default().fg(Theme::success()),
+            )));
         } else {
-            let waiting = Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled("   Waiting for results...", Theme::dim())),
-            ]);
-            frame.render_widget(waiting, chunks[1]);
+            lines.push(Line::from(Span::styled(
+                "  Searching academic databases...",
+                Theme::muted(),
+            )));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Typically takes 15-25 seconds.",
+            Theme::dim(),
+        )));
+
+        frame.render_widget(Paragraph::new(lines), area);
+
+        // Show papers found so far below the progress.
+        if !self.papers.is_empty() {
+            let list_area = Rect {
+                y: area.y + 9,
+                height: area.height.saturating_sub(9),
+                ..area
+            };
+            if list_area.height > 2 {
+                self.render_paper_list(frame, list_area);
+            }
         }
     }
 
-    // ── Paper table ─────────────────────────────────────────────
+    // ── Paper list ──────────────────────────────────────────
 
-    fn render_paper_table(&self, frame: &mut Frame, area: Rect) {
-        let table_width = area.width as usize;
-        let fixed_cols = 4 + 6 + 7 + 6 + 4;
-        let title_max = table_width.saturating_sub(fixed_cols).max(10);
-
-        let table_inner_height = area.height.saturating_sub(2) as usize;
-        let scroll_offset = if self.selected >= table_inner_height {
-            self.selected - table_inner_height + 1
+    fn render_paper_list(&self, frame: &mut Frame, area: Rect) {
+        let visible_height = area.height as usize;
+        let scroll_offset = if self.selected >= visible_height {
+            self.selected - visible_height + 1
         } else {
             0
         };
 
-        let header = Row::new(vec![
-            Cell::from(" # "),
-            Cell::from("Title"),
-            Cell::from(" Year"),
-            Cell::from("  Cites"),
-            Cell::from("Source"),
-        ])
-        .style(Theme::header());
+        let w = area.width as usize;
+        let fixed_cols = 6 + 6 + 7 + 6; // num + year + cites + source
+        let title_max = w.saturating_sub(fixed_cols).max(10);
 
-        let rows: Vec<Row> = self
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, paper) in self
             .papers
             .iter()
             .enumerate()
             .skip(scroll_offset)
-            .take(table_inner_height)
-            .map(|(i, paper)| {
-                let style = if i == self.selected {
-                    Theme::selected()
-                } else {
-                    Theme::normal()
-                };
+            .take(visible_height)
+        {
+            let is_selected = i == self.selected;
+            let source_str = match paper.source {
+                uniq_core::research::PaperSource::SemanticScholar => "S2",
+                uniq_core::research::PaperSource::ArXiv => "arXiv",
+            };
 
-                let source_str = match paper.source {
-                    uniq_core::research::PaperSource::SemanticScholar => "S2",
-                    uniq_core::research::PaperSource::ArXiv => "arXiv",
-                };
+            let row_style = if is_selected {
+                Style::default().fg(Theme::fg()).bg(Theme::selection_bg())
+            } else {
+                Style::default()
+            };
 
-                Row::new(vec![
-                    Cell::from(format!("{:>3}", i + 1)),
-                    Cell::from(truncate(&paper.title, title_max)),
-                    Cell::from(
-                        paper
-                            .year
-                            .map(|y| format!(" {}", y))
-                            .unwrap_or_else(|| "    ".to_string()),
+            lines.push(Line::from(vec![
+                Span::styled(if is_selected { " ▸ " } else { "   " }, row_style),
+                Span::styled(
+                    format!(
+                        "{:<width$}",
+                        truncate(&paper.title, title_max),
+                        width = title_max
                     ),
-                    Cell::from(
-                        paper
-                            .citation_count
-                            .map(|c| format!("{:>6}", c))
-                            .unwrap_or_else(|| "     —".to_string()),
-                    ),
-                    Cell::from(format!("{:<5}", source_str)),
-                ])
-                .style(style)
-            })
-            .collect();
+                    if is_selected {
+                        Style::default().fg(Theme::fg()).bg(Theme::selection_bg())
+                    } else {
+                        Theme::normal()
+                    },
+                ),
+                Span::styled(
+                    paper
+                        .year
+                        .map(|y| format!(" {}", y))
+                        .unwrap_or_else(|| "     ".to_string()),
+                    Theme::dim(),
+                ),
+                Span::styled(
+                    paper
+                        .citation_count
+                        .map(|c| format!(" {:>5}", c))
+                        .unwrap_or_else(|| "     —".to_string()),
+                    Theme::muted(),
+                ),
+                Span::styled(format!("  {}", source_str), Theme::dim()),
+            ]));
+        }
 
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(4),
-                Constraint::Min(10),
-                Constraint::Length(6),
-                Constraint::Length(7),
-                Constraint::Length(6),
-            ],
-        )
-        .header(header)
-        .column_spacing(1)
-        .block(Block::default().borders(Borders::TOP));
-
-        frame.render_widget(table, area);
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
-    // ── Paper detail (compact) ──────────────────────────────────
+    // ── Paper detail (compact) ──────────────────────────────
 
     fn render_paper_detail(&self, frame: &mut Frame, area: Rect) {
         let Some(paper) = self.papers.get(self.selected) else {
@@ -373,120 +326,25 @@ impl ResearchExplorerComponent {
         };
 
         let detail_block = Block::default()
-            .title(" Paper Detail ")
-            .borders(Borders::ALL)
-            .border_style(Theme::dim());
+            .borders(Borders::TOP)
+            .border_style(Theme::border());
 
-        let detail_inner_width = area.width.saturating_sub(2) as usize;
-        let abstract_text = truncate(&paper.abstract_text, detail_inner_width * 2);
-        let authors_text = truncate(
-            &paper.authors.join(", "),
-            detail_inner_width.saturating_sub(10),
-        );
+        let inner = detail_block.inner(area);
+        frame.render_widget(detail_block, area);
 
-        let source_str = match paper.source {
-            uniq_core::research::PaperSource::SemanticScholar => "Semantic Scholar",
-            uniq_core::research::PaperSource::ArXiv => "arXiv",
-        };
+        let w = inner.width as usize;
+        let authors_text = truncate(&paper.authors.join(", "), w.saturating_sub(12));
+        let abstract_text = truncate(&paper.abstract_text, w * 2);
 
-        let pdf_label = if paper.pdf_url.is_some() {
-            "Available"
-        } else {
-            "N/A"
-        };
-        let pdf_style = if paper.pdf_url.is_some() {
-            Style::default().fg(Theme::success())
-        } else {
-            Theme::dim()
-        };
+        let pdf_label = if paper.pdf_url.is_some() { "yes" } else { "no" };
 
         let detail = Paragraph::new(vec![
             Line::from(vec![
-                Span::styled("Authors: ", Theme::header()),
-                Span::styled(authors_text, Theme::normal()),
+                Span::styled("  Authors  ", Theme::muted()),
+                Span::styled(authors_text, Theme::dim()),
             ]),
             Line::from(vec![
-                Span::styled("Source: ", Theme::header()),
-                Span::styled(source_str, Theme::normal()),
-                Span::styled("  PDF: ", Theme::header()),
-                Span::styled(pdf_label, pdf_style),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(abstract_text, Theme::dim())),
-        ])
-        .wrap(Wrap { trim: true })
-        .block(detail_block);
-
-        frame.render_widget(detail, area);
-    }
-
-    // ── Expanded detail ─────────────────────────────────────────
-
-    fn render_expanded_detail(&self, frame: &mut Frame, area: Rect, paper: &PaperMeta) {
-        let block = Block::default()
-            .title(format!(
-                " Paper {}/{} — [Enter/Esc] close  [↑↓] scroll ",
-                self.selected + 1,
-                self.papers.len()
-            ))
-            .title_style(Theme::title())
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Theme::accent()));
-
-        let inner = block.inner(area);
-        let w = inner.width as usize;
-
-        let source_str = match paper.source {
-            uniq_core::research::PaperSource::SemanticScholar => "Semantic Scholar",
-            uniq_core::research::PaperSource::ArXiv => "arXiv",
-        };
-
-        let pdf_label = if paper.pdf_url.is_some() {
-            "Available"
-        } else {
-            "N/A"
-        };
-
-        let date_str = paper
-            .published_date
-            .map(|d| d.to_string())
-            .unwrap_or_else(|| "—".to_string());
-
-        let mut lines: Vec<Line> = vec![
-            Line::from(vec![
-                Span::styled("Title: ", Theme::header()),
-                Span::styled(&paper.title, Theme::normal()),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Authors: ", Theme::header()),
-                Span::styled(paper.authors.join(", "), Theme::normal()),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Year: ", Theme::header()),
-                Span::styled(
-                    paper
-                        .year
-                        .map(|y| y.to_string())
-                        .unwrap_or_else(|| "—".to_string()),
-                    Theme::normal(),
-                ),
-                Span::styled("    Published: ", Theme::header()),
-                Span::styled(date_str, Theme::normal()),
-                Span::styled("    Citations: ", Theme::header()),
-                Span::styled(
-                    paper
-                        .citation_count
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| "—".to_string()),
-                    Theme::normal(),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("Source: ", Theme::header()),
-                Span::styled(source_str, Theme::normal()),
-                Span::styled("    PDF: ", Theme::header()),
+                Span::styled("  PDF      ", Theme::muted()),
                 Span::styled(
                     pdf_label,
                     if paper.pdf_url.is_some() {
@@ -496,37 +354,106 @@ impl ResearchExplorerComponent {
                     },
                 ),
             ]),
+            Line::from(""),
             Line::from(vec![
-                Span::styled("URL: ", Theme::header()),
+                Span::styled("  ", Theme::dim()),
+                Span::styled(abstract_text, Theme::dim()),
+            ]),
+        ])
+        .wrap(Wrap { trim: true });
+
+        frame.render_widget(detail, inner);
+    }
+
+    // ── Expanded detail ─────────────────────────────────────
+
+    fn render_expanded_detail(&self, frame: &mut Frame, area: Rect, paper: &PaperMeta) {
+        let block = Block::default()
+            .title(format!(" {}/{} ", self.selected + 1, self.papers.len()))
+            .title_style(Theme::muted())
+            .borders(Borders::ALL)
+            .border_style(Theme::border());
+
+        let inner = block.inner(area);
+        let w = inner.width as usize;
+
+        let source_str = match paper.source {
+            uniq_core::research::PaperSource::SemanticScholar => "Semantic Scholar",
+            uniq_core::research::PaperSource::ArXiv => "arXiv",
+        };
+
+        let date_str = paper
+            .published_date
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "—".to_string());
+
+        let mut lines: Vec<Line> = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  ", Theme::dim()),
+                Span::styled(&paper.title, Theme::header()),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Authors   ", Theme::muted()),
+                Span::styled(paper.authors.join(", "), Theme::normal()),
+            ]),
+            Line::from(vec![
+                Span::styled("  Year      ", Theme::muted()),
+                Span::styled(
+                    paper
+                        .year
+                        .map(|y| y.to_string())
+                        .unwrap_or_else(|| "—".to_string()),
+                    Theme::normal(),
+                ),
+                Span::styled("  Published  ", Theme::muted()),
+                Span::styled(date_str, Theme::normal()),
+                Span::styled("  Citations  ", Theme::muted()),
+                Span::styled(
+                    paper
+                        .citation_count
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "—".to_string()),
+                    Theme::normal(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  Source    ", Theme::muted()),
+                Span::styled(source_str, Theme::normal()),
+            ]),
+            Line::from(vec![
+                Span::styled("  URL       ", Theme::muted()),
                 Span::styled(&paper.url, Theme::dim()),
             ]),
         ];
 
-        if let Some(ref pdf) = paper.pdf_url {
-            lines.push(Line::from(vec![
-                Span::styled("PDF: ", Theme::header()),
-                Span::styled(pdf, Theme::dim()),
-            ]));
-        }
-
         if !paper.fields.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Fields: ", Theme::header()),
-                Span::styled(paper.fields.join(", "), Theme::normal()),
+                Span::styled("  Fields    ", Theme::muted()),
+                Span::styled(paper.fields.join(", "), Theme::dim()),
             ]));
         }
 
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Abstract", Theme::header())));
         lines.push(Line::from(Span::styled(
-            "─".repeat(w.min(60)),
-            Theme::dim(),
+            format!("  {}", "─".repeat(w.saturating_sub(4).min(60))),
+            Theme::border(),
         )));
         lines.push(Line::from(""));
 
-        for wrapped_line in word_wrap(&paper.abstract_text, w.saturating_sub(1).max(1)) {
-            lines.push(Line::from(Span::styled(wrapped_line, Theme::normal())));
+        for wrapped_line in word_wrap(&paper.abstract_text, w.saturating_sub(4).max(1)) {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", wrapped_line),
+                Theme::normal(),
+            )));
         }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  enter/esc close  ↑↓ scroll",
+            Theme::dim(),
+        )));
 
         let para = Paragraph::new(lines)
             .scroll((self.detail_scroll, 0))
@@ -536,7 +463,7 @@ impl ResearchExplorerComponent {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────
 
 fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {

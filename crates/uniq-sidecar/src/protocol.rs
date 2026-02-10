@@ -50,6 +50,18 @@ pub struct ExtractTechniqueRequest {
 
 // Response is uniq_core::research::TechniqueCard
 
+// ── Batch Technique Extraction (abstract-based) ─────────────
+
+#[derive(Debug, Serialize)]
+pub struct BatchExtractRequest {
+    pub papers: Vec<uniq_core::research::PaperMeta>,
+    pub project_summary: String,
+    pub user_request: String,
+    pub max_techniques: usize,
+}
+
+// Response is Vec<uniq_core::research::TechniqueCard>
+
 // ── Variant Generation ──────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
