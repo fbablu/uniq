@@ -483,49 +483,39 @@ impl App {
             let queries = vec![
                 short_desc.clone(),
                 format!("{} machine learning", short_desc),
-                format!("{} deep learning", short_desc),
                 short_summary,
             ];
 
             let total_queries = queries.len();
-            let mut had_error = false;
+            let _ = tx.send(Action::SearchQueryStarted {
+                query: queries.join(" | "),
+                query_idx: 0,
+                total_queries: 1,
+            });
 
-            // Send queries one at a time so we can show per-query progress.
-            for (i, query) in queries.iter().enumerate() {
-                let _ = tx.send(Action::SearchQueryStarted {
-                    query: query.clone(),
-                    query_idx: i,
-                    total_queries,
-                });
-
-                match client
-                    .search_papers(vec![query.clone()], 20, Some(2020), None, true)
-                    .await
-                {
-                    Ok(papers) => {
-                        if !papers.is_empty() {
-                            info!(
-                                "Query {}/{}: found {} papers",
-                                i + 1,
-                                total_queries,
-                                papers.len()
-                            );
-                            let _ = tx.send(Action::PapersFound(papers));
-                        }
+            // Send all queries in a single sidecar call so the Python side
+            // can search S2 + arXiv concurrently across all queries.
+            match client
+                .search_papers(queries, 60, Some(2020), None, true)
+                .await
+            {
+                Ok(papers) => {
+                    info!(
+                        "Search complete: {} queries, {} papers found",
+                        total_queries,
+                        papers.len()
+                    );
+                    if !papers.is_empty() {
+                        let _ = tx.send(Action::PapersFound(papers));
                     }
-                    Err(e) => {
-                        warn!("Query {}/{} failed: {}", i + 1, total_queries, e);
-                        had_error = true;
-                        // Continue with remaining queries rather than aborting.
-                    }
+                }
+                Err(e) => {
+                    warn!("Search failed: {}", e);
+                    let _ = tx.send(Action::ResearchFailed(format!("{}", e)));
                 }
             }
 
-            if had_error {
-                let _ = tx.send(Action::ResearchComplete);
-            } else {
-                let _ = tx.send(Action::ResearchComplete);
-            }
+            let _ = tx.send(Action::ResearchComplete);
         });
     }
 

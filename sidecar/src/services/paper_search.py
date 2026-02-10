@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Rate limiting.
 SEMANTIC_SCHOLAR_DELAY = 1.1  # seconds between requests (API limit: 1/sec with key)
-ARXIV_DELAY = 3.0  # seconds between requests (recommended by arXiv)
+ARXIV_DELAY = 1.5  # seconds between requests
+
+# Timeout for individual search API calls (seconds).
+SEARCH_TIMEOUT = 15
 
 SEMANTIC_SCHOLAR_BASE = "https://api.semanticscholar.org/graph/v1"
 ARXIV_BASE = "https://export.arxiv.org/api/query"
@@ -47,7 +50,7 @@ async def search_semantic_scholar(
     offset = 0
     limit = min(max_results, 100)  # API max per request is 100.
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT, follow_redirects=True) as client:
         retries = 0
         max_retries = 3
         while offset < max_results:
@@ -72,7 +75,7 @@ async def search_semantic_scholar(
                     if retries > max_retries:
                         logger.warning("Semantic Scholar rate limit exceeded, giving up")
                         break
-                    wait_time = min(5 * retries, 30)
+                    wait_time = min(3 * retries, 10)
                     logger.warning(f"Semantic Scholar rate limited, waiting {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     continue
@@ -135,7 +138,7 @@ async def search_arxiv(
     # Build arXiv search query.
     search_query = f"all:{query}"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
         offset = 0
         batch_size = min(max_results, 200)
 
@@ -234,32 +237,48 @@ async def search_all_sources(
     all_papers: list[PaperMeta] = []
     seen_titles: set[str] = set()
 
-    per_query_limit = max(max_results // len(queries), 50) if queries else max_results
+    per_query_limit = max(max_results // max(len(queries), 1), 20)
 
+    # Build all search tasks upfront and run concurrently.
+    tasks: list[asyncio.Task] = []
     for query in queries:
-        # Search both sources concurrently.
-        s2_task = search_semantic_scholar(
-            query=query,
-            max_results=per_query_limit,
-            year_min=year_min,
-            year_max=year_max,
-            prefer_open_access=prefer_open_access,
+        s2_task = asyncio.create_task(
+            search_semantic_scholar(
+                query=query,
+                max_results=per_query_limit,
+                year_min=year_min,
+                year_max=year_max,
+                prefer_open_access=prefer_open_access,
+            )
         )
-        arxiv_task = search_arxiv(
-            query=query,
-            max_results=per_query_limit,
-            year_min=year_min,
-            year_max=year_max,
+        arxiv_task = asyncio.create_task(
+            search_arxiv(
+                query=query,
+                max_results=per_query_limit,
+                year_min=year_min,
+                year_max=year_max,
+            )
         )
+        tasks.extend([s2_task, arxiv_task])
 
-        s2_papers, arxiv_papers = await asyncio.gather(s2_task, arxiv_task)
+    # Wait for all with a global timeout.
+    done, pending = await asyncio.wait(tasks, timeout=45)
 
-        for paper in [*s2_papers, *arxiv_papers]:
-            # Simple deduplication by title.
-            title_lower = paper.title.lower().strip()
-            if title_lower not in seen_titles:
-                seen_titles.add(title_lower)
-                all_papers.append(paper)
+    # Cancel anything still running.
+    for task in pending:
+        task.cancel()
+        logger.warning(f"Search task timed out and was cancelled: {task.get_name()}")
+
+    for task in done:
+        try:
+            papers = task.result()
+            for paper in papers:
+                title_lower = paper.title.lower().strip()
+                if title_lower not in seen_titles:
+                    seen_titles.add(title_lower)
+                    all_papers.append(paper)
+        except Exception as e:
+            logger.warning(f"Search task failed: {e}")
 
     # Sort by citation count (descending), then by year (descending).
     all_papers.sort(key=lambda p: (p.citation_count or 0, p.year or 0), reverse=True)

@@ -213,20 +213,30 @@ impl ResearchExplorerComponent {
         let spinner = SPINNER[self.spinner_tick % SPINNER.len()];
         let w = chunks[0].width as usize;
 
-        // Progress bar: visual bar made of block characters.
-        let (qi, qt) = self.query_progress;
-        let pct = if qt > 0 {
-            ((qi + 1) as f64 / qt as f64).min(1.0)
-        } else {
-            0.0
-        };
+        // Animated progress bar (pulsing since we don't know exact progress).
         let bar_width = w.saturating_sub(2);
-        let filled = (bar_width as f64 * pct) as usize;
-        let empty = bar_width.saturating_sub(filled);
-        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+        let cycle = self.spinner_tick % (bar_width * 2);
+        let pos = if cycle < bar_width {
+            cycle
+        } else {
+            bar_width * 2 - cycle
+        };
+        let bar: String = (0..bar_width)
+            .map(|i| {
+                let dist = (i as isize - pos as isize).unsigned_abs();
+                if dist < 3 {
+                    '█'
+                } else if dist < 5 {
+                    '▓'
+                } else if dist < 7 {
+                    '░'
+                } else {
+                    ' '
+                }
+            })
+            .collect();
 
-        // Truncate query to fit.
-        let query_display = truncate(&self.current_query, w.saturating_sub(4));
+        let elapsed_secs = self.spinner_tick / 10; // tick rate is 100ms
 
         let panel = Paragraph::new(vec![
             Line::from(vec![
@@ -237,7 +247,7 @@ impl ResearchExplorerComponent {
                         .add_modifier(ratatui::style::Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("Searching academic databases...  query {}/{}", qi + 1, qt),
+                    format!("Searching Semantic Scholar + arXiv...  ({}s)", elapsed_secs),
                     Theme::header(),
                 ),
             ]),
@@ -247,13 +257,20 @@ impl ResearchExplorerComponent {
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("   → ", Style::default().fg(Theme::warning())),
-                Span::styled(format!("\"{}\"", query_display), Theme::normal()),
+                Span::styled("   ", Theme::dim()),
+                Span::styled(
+                    format!("{} papers found so far", self.papers.len()),
+                    if self.papers.is_empty() {
+                        Theme::dim()
+                    } else {
+                        Style::default().fg(Theme::success())
+                    },
+                ),
             ]),
-            Line::from(vec![Span::styled(
-                format!("   {} papers found so far", self.papers.len()),
+            Line::from(Span::styled(
+                "   This typically takes 15-25 seconds",
                 Theme::dim(),
-            )]),
+            )),
         ]);
         frame.render_widget(panel, chunks[0]);
 
